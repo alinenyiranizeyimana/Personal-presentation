@@ -1,0 +1,1116 @@
+---
+title: "Arsenic Exposure and Respiratory Mortality"
+author: "Aline NYIRANIZEYIMANA<br> <br> Supervisor: <br>Dr. Arsenio Nhacolo"
+
+date: today
+format:
+  revealjs:
+    title-slide-attributes:
+      data-background-image: aims.png
+      data-background-size: 500px
+      data-background-position: center bottom
+    logo: "arsenic_look.png"
+---
+
+
+
+## Introduction to Arsenic
+
+
+<div style="display: flex; align-items: center; justify-content: center; height: 80%;">
+:::: {.columns}
+::: {.column width="50%"}
+
+<p>
+  <span style="font-size: 0.8em;">
+ Arsenic is a naturally chemical element(As) found in the Earth's crust. Earned the nickname "king of poisons".
+   </span>
+</p>
+
+<p>
+  <span style="font-size: 0.8em;">
+Arsenic is used in industry, such as making metals, where exposure to arsenic dust or fumes can harm the respiratory system, causing respiratory mortality.
+  </span>
+</p>
+
+
+:::
+
+::: {.column width="50%"}
+<div style="display: flex; align-items: center; justify-content: center; height: 100%; padding-top: 20px;">
+![Arsenic exposure and its association with respiratory mortality.](image.png){#fig-arsenic-exposure width=120%}
+</div>
+:::
+
+
+</div>
+:::
+
+
+
+
+## 
+
+![Arsenic source](source_arsenic.png){#fig-arsenic-source width=80%}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##  Research Question 
+
+
+
+::: {.callout-note appearance="minimal"}
+
+### Question
+
+<br>
+
+What is the association between arsenic exposure and respiratory mortality in an exposed population?
+
+<br>
+
+### Specific Objectives {.smaller}
+1. Describe respiratory mortality rates across arsenic exposure levels.  
+2. Estimate rate ratios using Poisson regression.  
+3. Assess whether the effect of arsenic varies by age group.  
+4. Identify patterns in mortality that can inform public health interventions.
+:::
+
+
+
+
+## Dataset {.center}
+
+```{r}
+#| echo: false
+#| eval: true
+#| code-fold: true
+#| code-summary: ""
+#| tbl-cap: "Montana Cohort Dataset Structure"
+#| label: tbl-dataset
+library(knitr)
+library(kableExtra)
+## Inspection
+
+
+# Create the data frame
+data <- data.frame(
+  Variable = c("agegr", "arsenic", "", "personyrs", "respdeath"),
+  Description = c(
+    "Age group (40-49, 50-59, 60-69, 70-79)",
+    "Exposure level (1 = <1 yr, 2 = 1-4 yrs,",
+    "3 = 5-14 yrs, 4 = 15+ yrs)",
+    "Person-years at risk",
+    "Respiratory death count"
+  )
+)
+
+
+kable(data, 
+      format = "html",
+      caption = "Montana Cohort Dataset Structure",
+      col.names = c("Variable", "Description"),
+      align = c("l", "l")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = TRUE,  
+    position = "center",
+    font_size = 28  #
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#4472C4", font_size = 18) %>%
+  column_spec(1, bold = TRUE, width = "15em") %>%  
+  column_spec(2, width = "45em")
+```
+
+
+<br>
+
+::: {.callout-note}
+
+These data originate from a cohort study of industrial arsenic exposure and respiratory disease mortality. The variables *period* and *starting* were not included in the analysis due to inefficient description.
+:::
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Data Loading Code"
+library(epiDisplay)
+library(dplyr)
+library(ggplot2)
+data("Montana", package = "epiDisplay")
+```
+
+
+
+```{r}
+
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Data Preparation Code"
+df<-Montana
+
+## Data Preparation {.smaller}
+df_clean <- df %>%
+  mutate(
+    respiratory_deaths = respdeath,
+    person_years = personyrs,
+    
+    age_group = factor(
+      agegr,
+      levels = 1:4,
+      labels = c("40–49 years", "50–59 years", "60–69 years", "70–79 years")
+    ),
+  
+    arsenic_exposure = factor(
+      arsenic,
+      levels = 1:4,
+      labels = c("<1 year", "1–4 years", "5–14 years", "15+ years"),
+      ordered = TRUE
+    ),
+  )
+
+```
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Quality Check Code"
+
+## Data Quality Checks {.smaller}
+#colSums(is.na(df))
+
+df_clean <- df_clean %>%
+  filter(respdeath >= 0, personyrs > 0)
+
+df_clean <- df_clean %>%
+  mutate(respiratory_mortality_rate = respiratory_deaths / person_years)
+```
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Validation Code"
+
+## Checking for Impossible Values {.smaller}
+
+impossible_values <- df_clean %>%
+  filter(respiratory_deaths < 0 | person_years <= 0)
+
+
+negative_rates <- df_clean %>%
+  filter(respiratory_mortality_rate < 0)
+
+```
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Consistency Check Code"
+
+### Consistency Checks {.smaller}
+
+deaths_exceed_py <- df_clean %>%
+  filter(respiratory_deaths > person_years)
+
+
+
+zero_deaths_nonzero_rate <- df_clean %>%
+  filter(respiratory_deaths == 0 & respiratory_mortality_rate != 0)
+```
+
+
+
+
+
+
+
+
+
+## EDA
+
+### Distribution of deaths by Arsenic exposure {.small}
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| label: tbl-summar
+#| tbl-cap: "Distribution of Respiratory Deaths by Arsenic Exposure Duration"
+#| code-summary: ""
+
+## Summary by Arsenic Exposure {.smaller}
+
+library(kableExtra)
+summary_exposure <- df_clean %>%
+  group_by(arsenic_exposure) %>%
+  summarise(
+    person_years = sum(person_years),
+    deaths = sum(respiratory_deaths),
+    mortality_rate = (deaths / person_years) * 100000,
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    percent_person_years = (person_years / sum(person_years)) * 100,
+    percent_deaths = (deaths / sum(deaths)) * 100
+  )
+
+```
+
+
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| label: fig-summary
+#| fig-cap: "Distribution of Respiratory Deaths by Arsenic Exposure Duration"
+#| code-summary: ""
+
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# Prepare data (same as your summary)
+summary_exposure <- df_clean %>%
+  mutate(
+    arsenic_exposure = factor(
+      arsenic_exposure,
+      levels = c("<1 year", "1–4 years", "5–14 years", "15+ years")
+    )
+  ) %>%
+  group_by(arsenic_exposure) %>%
+  summarise(
+    person_years = sum(person_years),
+    deaths = sum(respiratory_deaths),
+    mortality_rate = (deaths / person_years) * 100000,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    percent_person_years = (person_years / sum(person_years)) * 100,
+    percent_deaths = (deaths / sum(deaths)) * 100,
+    exposure_label = paste0(" ", arsenic_exposure)
+  )
+
+
+# Create plot
+ggplot(summary_exposure, aes(x = arsenic_exposure)) +
+  geom_bar(aes(y = mortality_rate, fill = "Mortality Rate"),
+           stat = "identity", width = 0.5) +
+  geom_text(aes(y = mortality_rate, label = round(mortality_rate, 1)),
+            vjust = -0.5) +
+  geom_point(aes(y = percent_person_years, color = "Percent Person-Years"),
+             size = 3) +
+  geom_point(aes(y = percent_deaths, color = "Percent Deaths"),
+             size = 3, shape = 17) +
+  scale_y_continuous(
+    name = "Mortality Rate per 100,000",
+    sec.axis = sec_axis(~ ., name = "Percentage (%)")
+  ) +
+  scale_fill_manual("", values = c("Mortality Rate" = "steelblue")) +
+  scale_color_manual("", values = c("Percent Person-Years" = "darkgreen",
+                                    "Percent Deaths" = "darkred")) +
+  labs(x = "Arsenic Exposure") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(hjust = 0.5)
+  )
+
+
+```
+
+
+
+
+
+
+
+
+
+
+## Summary by Age Group {.small}
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| tbl-cap: "Distribution of Respiratory Deaths by Age Group"
+#| label: tbl-sumage
+#| code-summary: ""
+summary_age <- df_clean %>%
+  group_by(age_group) %>%
+  summarise(
+    person_years = sum(person_years),
+    deaths = sum(respiratory_deaths),
+    mortality_rate = (deaths / person_years) * 100000,
+    .groups = 'drop'
+  )
+
+kable(summary_age, 
+      caption = "",
+      col.names = c("Age Group", "Person-Years", "Deaths", "Rate per 100,000"),
+      digits = c(NA, 0, 0, 2),
+      align = c("l", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "", "condensed"),
+                full_width = FALSE,
+                position = "left",
+                font_size = 22) %>%
+  column_spec(2, bold = FALSE, color = "black") %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#e74c3c")
+
+```
+::: {.callout-note}
+Respiratory mortality rates increased dramatically with age, rising from 42.54 per 100,000 in the 40–49 age group to 615.50 per 100,000 in the 70–79 age group—over 14 times higher.
+:::
+
+
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Cross-Tab Code"
+
+## Cross-Tabulation {.smaller}
+library(dplyr)
+library(tidyr)
+
+cross_tab <- df_clean %>%
+  group_by(arsenic_exposure, age_group) %>%
+  summarise(
+    person_years = sum(person_years),
+    deaths = sum(respiratory_deaths),
+    .groups = 'drop'
+  ) %>%
+  mutate(mortality_rate = (deaths / person_years) * 100000)
+
+cross_tab_wide <- cross_tab %>%
+  dplyr::select(arsenic_exposure, age_group, mortality_rate) %>%
+  pivot_wider(
+    names_from = age_group,
+    values_from = mortality_rate,
+    values_fill = 0
+  )
+
+
+#cross_tab_wide %>%
+# kbl(caption = "Mortality Rates (per 100,000 person-years) by Arsenic Exposure Duration and Age Group",
+      #digits = 2) %>%
+  #kable_classic(full_width = FALSE) %>%
+  #kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+##
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+#| fig-width: 10
+#| fig-height: 6
+#| label: fig-crosstab
+#| fig-cap: "Mortality Rates by Arsenic Exposure and Age Group"
+
+library(ggplot2)
+library(ggpubr)
+
+# Use the cross_tab data from earlier
+cross_tab <- df_clean %>%
+  group_by(arsenic_exposure, age_group) %>%
+  summarise(
+    person_years = sum(person_years),
+    deaths = sum(respiratory_deaths),
+    .groups = 'drop'
+  ) %>%
+  mutate(mortality_rate = (deaths / person_years) * 100000)
+
+ggplot(cross_tab, aes(x = arsenic_exposure, y = mortality_rate, 
+                      fill = age_group)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(
+    title = "Respiratory Mortality Rate by Arsenic Exposure and Age Group",
+    x = "Arsenic Exposure Duration",
+    y = "Mortality Rate (per 100,000 person-years)",
+    fill = "Age Group"
+  ) +
+  theme_pubr() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  ) +
+  geom_text(aes(label = round(mortality_rate, 1)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 2.5)
+```
+
+
+
+
+
+```{r}
+#| echo: false
+#| eval: false
+#| code-fold: true
+#| code-summary: ""
+#| fig-width: 10
+#| fig-height: 6
+#| label: fig-barmort
+#| fig-cap: "Mortality Rates by Arsenic Exposure"
+
+## Mortality Rates by Arsenic Exposure
+library(ggpubr)
+ggplot(summary_exposure, 
+       aes(x = arsenic_exposure, 
+           y = mortality_rate, 
+           fill = arsenic_exposure)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  scale_fill_manual(values = c("#E8F4FD", "#B3D9F2", "#66B2E5", "violet")) +
+  labs(
+    title = "Respiratory Mortality Rate by Arsenic Exposure",
+    x = "Arsenic Exposure Duration",
+    y = "Mortality Rate ",
+    fill = "Arsenic Exposure"
+  ) +
+  theme_pubr() +
+  theme(
+    plot.title = element_text(hjust = 0.3, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  ) +
+  ylim(0, max(summary_exposure$mortality_rate) * 1.2)
+```
+
+## Trends Across Age Groups
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+#| fig-width: 10
+#| fig-height: 6
+#| label: fig-tr
+#| fig-cap: "Trends Across Age Groups"
+ggplot(cross_tab, aes(x = arsenic_exposure, y = mortality_rate, 
+                      color = age_group, group = age_group)) +
+  geom_point(size = 3) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Respiratory Mortality by Arsenic Exposure Duration and Age",
+    x = "Arsenic Exposure Duration",
+    y = "Mortality Rate",
+    color = "Age Group"
+  ) +
+  theme_pubr() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  scale_color_brewer(palette = "Set1")
+```
+
+
+
+## Poisson Regression Model{.small}
+
+$$
+\log(\mu_i) = \beta_0 + \beta_1 \text{Arsenic}_i + \beta_2 \text{Age}_i + \log(\text{PersonYrs}_i)
+$$
+
+where
+
+- $\mu_i$ = expected count of respiratory deaths
+- $\log(\text{PersonYrs}_i)$ = offset term
+
+
+::: {.callout-warning}
+
+## Key Assumptions {}
+
+- Events are independent
+- Mean equals variance 
+- Exposure correctly measured
+:::
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Model Code"
+library(knitr)
+library(kableExtra)
+
+df_clean$arsenic_exposure <- factor(df_clean$arsenic_exposure, 
+                                     levels = c("<1 year", "1–4 years", 
+                                               "5–14 years", "15+ years"),
+                                     ordered = FALSE)
+
+model1 <- glm(respiratory_deaths ~ arsenic_exposure + age_group,
+              family = poisson(link = "log"),
+              offset = log(person_years),
+              data = df_clean)
+
+summary_model1 <- summary(model1)
+#print(summary_model1)
+```
+
+## RR and CI from Main model{.smaller}
+
+```{r}
+
+```
+
+
+
+
+
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+# Extract model results
+rate_ratios_model1 <- exp(coef(model1))
+conf_int_model1 <- exp(confint(model1))
+p_vals <- summary_model1$coefficients[, 4]
+
+# Format p-values
+p_vals_fmt <- ifelse(
+  p_vals < 0.001,
+  "<0.001",
+  sprintf("%.3f", p_vals)
+)
+
+# Combine into results table (remove duplicate column)
+results_model1 <- data.frame(
+  Variable = names(rate_ratios_model1),
+  Rate_Ratio = round(rate_ratios_model1, 3),
+  CI_Lower = round(conf_int_model1[, 1], 3),
+  CI_Upper = round(conf_int_model1[, 2], 3),
+  p_value = p_vals_fmt
+)
+
+# Display table
+kable(results_model1[-1], 
+      col.names = c("Variable", "Rate Ratio", "95% CI Lower", "95% CI Upper", "p-value"),
+      align = c("l", "r", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"),
+                full_width = FALSE,
+                position = "left",
+                font_size = 22) %>%
+  column_spec(2, bold = FALSE, color = "black") %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#e74c3c")
+
+```
+<br>
+
+::: {.callout-note}
+Rate ratios indicate the relative increase in respiratory mortality compared to the reference groups (lowest arsenic exposure and 40–49 years age group). Both higher arsenic exposure and older age are associated with substantially increased mortality risk, with the highest age group (70–79 years) showing over 13 times the rate of the reference
+:::
+
+
+
+
+
+
+
+
+
+
+
+
+## Forest Plot
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+#| warning: false
+#| message: false
+#| label: fig-forest
+#| fig-cap: "PLot showing the RR with CI"
+
+library(ggplot2)
+library(dplyr)
+
+plot_data <- results_model1 %>%
+  filter(Variable != "(Intercept)") %>%   
+  mutate(
+    Variable = factor(Variable, levels = rev(Variable)),
+    label_text = sprintf("%.2f (%.2f–%.2f)", Rate_Ratio, CI_Lower, CI_Upper)
+  ) %>%
+  filter(Rate_Ratio > 0 & !is.na(Rate_Ratio))
+
+ggplot(plot_data, aes(x = Rate_Ratio, y = Variable)) +
+  geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8
+  ) +
+  geom_point(
+    aes(color = Variable),
+    size = 3
+  ) +
+  geom_errorbarh(
+    aes(xmin = CI_Lower, xmax = CI_Upper, color = Variable),
+    height = 0.2,
+    size = 0.6
+  ) +
+  geom_text(aes(label = label_text), hjust = -0.8, size = 3) +
+  scale_x_log10(expand = expansion(mult = c(0.1, 0.3))) +
+  scale_y_discrete(expand = expansion(add = c(1, 1))) +
+  labs(
+    x = "Rate Ratio (log scale)",
+    y = "",
+    title = "Forest Plot of Rate Ratios with 95% CI"
+  ) +
+  theme_pubr(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(10, 80, 10, 10),
+    axis.text.y = element_text(size = 10),
+    legend.position = "none"   # hide legend (optional)
+  )
+
+
+
+```
+
+
+
+
+
+
+
+
+## Interaction Testing {.smaller .center}
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+#| tbl-cap: "Model Comparison"
+#| label: tbl-interaction
+
+# Fit models
+model_main <- glm(respiratory_deaths ~ arsenic_exposure + age_group,
+                  family =poisson(link = "log"),
+                  offset = log(person_years),
+                  data = df_clean)
+
+rr_main <- exp(coef(model_main))
+ci_main <- exp(confint(model_main))
+
+model_inter <- glm(respiratory_deaths ~ arsenic_exposure * age_group,
+                   family = poisson(link = "log"),
+                   offset = log(person_years),
+                   data = df_clean)
+
+# Model comparison
+anova_results <- anova(model_main, model_inter, test = "Chisq")
+
+# Create professional table for model comparison
+comparison_df <- data.frame(
+  Model = c("Main Effects Only", "With Interaction"),
+  Terms = c("Arsenic + Age", "Arsenic × Age"),
+  Residual_Df = anova_results$`Resid. Df`,
+  Residual_Dev = round(anova_results$`Resid. Dev`, 2),
+  Df_Change = c(NA, abs(diff(anova_results$`Resid. Df`))),
+  Deviance_Change = c(NA, round(abs(diff(anova_results$`Resid. Dev`)), 2)),
+  p_value = c(NA, ifelse(anova_results$`Pr(>Chi)`[2] < 0.001, 
+                         "<0.001", 
+                         sprintf("%.3f", anova_results$`Pr(>Chi)`[2])))
+)
+
+# Display table
+kable(comparison_df,
+      col.names = c("Model", "Terms", "Resid. Df", "Resid. Dev", 
+                    "Df", "Deviance", "p-value"),
+      align = c("l", "l", "r", "r", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#3498db") %>%
+  row_spec(2, background = "#ecf0f1")
+
+```
+
+<br>
+
+**Result:** Interaction not significant (p = 0.111). Main effects model is appropriate.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Model Diagnostics {.smaller}
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| code-summary: ""
+#| fig-dpi: 300
+#| out.width: "100%"
+#| label: fig-diag
+#| fig-cap: "Model Diagnostics "
+#| fig-align: "center"
+
+deviance_gof <- with(model1, cbind(
+  Residual_deviance = deviance,
+  DF = df.residual,
+  p_value = pchisq(deviance, df.residual, lower.tail = FALSE)
+))
+
+par(mfrow = c(2, 2), oma = c(0, 0, 3, 0))
+plot(model1, which = c(1, 2, 3, 5))
+title("Diagnostic plots", outer = TRUE, line = 1, cex.main = 1)
+
+```
+
+
+
+
+::: {.callout-note appearance="minimal"}
+
+## Interpretation
+
+Diagnostic plots suggest adequate model fit. Residuals are randomly scattered, the Q-Q plot shows approximate normality, and variance is fairly constant. Observations 111 and 17 have higher leverage, but Cook's distances remain below 0.5, so they are not overly influential.
+:::
+
+
+```{r}
+#| echo: false
+#| code-fold: false
+#| code-summary: ""
+library(broom)
+## Final Categorical Analysis {.smaller}
+
+
+df_clean$arsenic_exposure <- factor(df_clean$arsenic_exposure, 
+                                     levels = c("<1 year", "1–4 years", 
+                                               "5–14 years", "15+ years"),
+                                     ordered = FALSE)
+
+model1_categorical <- glm(respiratory_deaths ~ arsenic_exposure + age_group, 
+                          family = poisson, 
+                          offset = log(person_years),
+                          data = df_clean)
+
+#summary(model1_categorical)
+```
+
+
+
+```{r}
+#| echo: false
+#| code-fold: false
+#| code-summary: ""
+## Rate ratios by exposure level {.small}
+arsenic_rr <- data.frame(
+  Exposure_Level = levels(df_clean$arsenic_exposure),
+  Rate_Ratio = NA, CI_Lower = NA, CI_Upper = NA, p_value = NA
+)
+
+arsenic_rr$Rate_Ratio[1] <- 1.00
+arsenic_rr$CI_Lower[1] <- 1.00
+arsenic_rr$CI_Upper[1] <- 1.00
+arsenic_rr$p_value[1] <- NA
+
+arsenic_coefs <- summary(model1_categorical)$coefficients[grep("arsenic_exposure", 
+                          rownames(summary(model1_categorical)$coefficients)), ]
+
+for (i in 2:nrow(arsenic_rr)) {
+  coef_row <- i - 1
+  arsenic_rr$Rate_Ratio[i] <- exp(arsenic_coefs[coef_row, "Estimate"])
+  arsenic_rr$CI_Lower[i] <- exp(arsenic_coefs[coef_row, "Estimate"] - 
+                                1.96 * arsenic_coefs[coef_row, "Std. Error"])
+  arsenic_rr$CI_Upper[i] <- exp(arsenic_coefs[coef_row, "Estimate"] + 
+                                1.96 * arsenic_coefs[coef_row, "Std. Error"])
+  arsenic_rr$p_value[i] <- arsenic_coefs[coef_row, "Pr(>|z|)"]
+}
+
+arsenic_rr$p_value_formatted <- ifelse(is.na(arsenic_rr$p_value), "–", 
+                                       ifelse(arsenic_rr$p_value < 0.001, "<0.001", 
+                                              sprintf("%.3f", arsenic_rr$p_value)))
+#arsenic_rr
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#| echo: false
+#| code-fold: true
+#| code-summary: "Show Summary Table Code"
+
+## Comprehensive Summary Table {.smaller}
+
+crude_rates <- df_clean %>%
+  group_by(arsenic_exposure) %>%
+  summarise(
+    total_deaths = sum(respiratory_deaths),
+    total_person_years = sum(person_years),
+    crude_rate_per_100k = (total_deaths / total_person_years) * 100000,
+    .groups = 'drop'
+  )
+
+final_summary <- data.frame(
+  Arsenic_Exposure = as.character(crude_rates$arsenic_exposure),
+  Deaths = crude_rates$total_deaths,
+  Person_Years = round(crude_rates$total_person_years, 0),
+  Crude_Rate = sprintf("%.1f", crude_rates$crude_rate_per_100k),
+  Adjusted_RR = sprintf("%.2f", arsenic_rr$Rate_Ratio),
+  CI_95 = sprintf("%.2f-%.2f", arsenic_rr$CI_Lower, arsenic_rr$CI_Upper),
+  p_Value = arsenic_rr$p_value_formatted,
+  stringsAsFactors = FALSE
+)
+
+final_summary$Adjusted_RR[1] <- "1.00"
+final_summary$CI_95[1] <- "Reference"
+
+
+```
+
+
+## Crude Mortality Rates {.smaller}
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| fig-cap: "Crude Respiratory Mortality Rates by Arsenic Exposure"
+#| label: fig-line
+#| code-summary: ""
+
+
+library(ggplot2)
+library(ggpubr)
+
+# Example dot plot / line plot for crude rates
+ggplot(crude_rates, aes(x = arsenic_exposure, y = crude_rate_per_100k)) +
+  geom_point(size = 4, color = "#e74c3c") +      # points for each category
+  geom_line(aes(group = 1), color = "#e74c3c", linetype = "dashed") + # dashed line connecting points
+  geom_text(aes(label = round(crude_rate_per_100k,1)), 
+            vjust = -0.5, size = 4) +           # add rate labels above points
+  labs(
+    x = "Arsenic Exposure",
+    y = "Crude Mortality Rate per 100,000",
+    title = "Crude Respiratory Mortality Rates by Arsenic Exposure"
+  ) +
+  theme_pubr(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+<br>
+
+::: {.callout-note appearance="minimal"}
+
+## Hence,
+
+The crude mortality rate increases with longer arsenic exposure duration, rising from 161.2 per 100,000 for exposures under 1 year to 638.2 per 100,000 for exposures of 15+ years(4 times higher), showing a clear dose-response relationship.
+:::
+
+
+
+
+## Plotting Adjusted Rate Ratios
+
+```{r}
+#| echo: true
+#| code-fold: true
+#| fig-cap: "Adjusted Rate Ratios for Arsenic Exposure (Age-Adjusted)"
+#| label: fig-adjusted
+#| code-summary: ""
+
+library(ggplot2)
+library(ggpubr)
+
+arsenic_rr <- arsenic_rr %>%
+  mutate(
+    Exposure_Level = factor(
+      Exposure_Level,
+      levels = c("<1 year", "1–4 years", "5–14 years", "15+ years")
+    )
+  )
+
+
+ggplot(arsenic_rr, aes(x = Exposure_Level, y = Rate_Ratio)) +
+  geom_point(size = 4, color = "#2c3e50") +
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper),
+                width = 0.2, color = "#2c3e50", linewidth = 1) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", linewidth = 1) +
+
+  # RR + CI above the CI bar
+  geom_text(aes(
+    y = CI_Upper * 1.3,
+    label = sprintf("%.2f\n(%.2f–%.2f)", Rate_Ratio, CI_Lower, CI_Upper)
+  ), size = 3, vjust = 0) +
+
+  # p-value higher above
+  geom_text(aes(
+    y = CI_Upper * 1.10,
+    label = p_value_formatted
+  ), size = 3, color = "blue", vjust = 0) +
+
+  labs(
+    x = "Arsenic Exposure Duration",
+    y = "Adjusted Rate Ratio (95% CI)",
+    title = "Age-Adjusted Respiratory Mortality Rate Ratios",
+    subtitle = "Reference: <1 year exposure"
+  ) +
+  scale_y_log10(
+    breaks = c(0.5, 1, 2, 3, 4, 5),
+    expand = expansion(mult = c(0.05, 0.60))  # extra space on top so labels are visible
+  ) +
+  coord_cartesian(clip = "off") +  # prevents text from being cut
+  theme_pubr(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.subtitle = element_text(face = "italic", color = "gray40")
+  )
+
+```
+<br>
+
+::: {.callout-note appearance="minimal"}
+
+## Hence,
+
+After accounting for age differences, the true arsenic risk is 3 times higher (not 4 times), because some of the extra deaths were actually from older age, not arsenic.
+:::
+
+
+
+
+
+##  {.smaller .center}
+
+:::: {.columns}
+
+::: {.column width="50%" style="font-size: 0.9em;"}
+### Discussion
+
+- Strong evidence of arsenic's harmful effect on respiratory health
+- Both exposure duration and age independently increase mortality risk
+- Dose-response relationship supports causality
+
+**Study Strengths**
+
+- Clear dose-response relationship observed, supports causal inference and Controlled age confounder.
+
+**Limitations**
+
+- Small sample size (114 observations), Potential confounders and may not generalize to other populations
+:::
+
+::: {.column width="50%"}
+### Recommendations
+- Check the health of workers with long arsenic exposure and older adults  
+- Make workplaces safer with protective gear and regular checks  
+- Watch exposed people for early signs of lung disease  
+- Reduce exposure with better equipment, rotating jobs, and cleaning up contaminated sites
+:::
+
+::: 
+
+
+## Conclusions {.smaller .center}
+
+::: {.incremental}
+1. **Arsenic exposure increases respiratory deaths**, more exposure → higher risk
+
+2. **Older people are at much higher risk**, especially ages 70-79 (over 13× higher)
+
+3. **Exposure and age both add to the risk** independently
+
+4. **Deaths can be prevented** with safer workplaces and monitoring
+
+5. **Public health actions are needed** to protect exposed people
+:::
+
+
+<br>
+
+::: {.callout-important appearance="minimal"}
+
+## Take home
+
+Every year of reduced arsenic exposure saves lives. Evidence based interventions can prevent respiratory deaths in vulnerable populations.
+:::
+
+## 
+
+
+<div align="center">
+
+![](question.png){ width=90%} 
+
+</div>
+
+
+
+
+## References
+
+<div style="font-size: 0.8em;">
+
+1. Smith, A. H., Goycolea, M., Haque, R., & Biggs, M. L. (1998). Marked increase in bladder and lung cancer mortality in a region of Northern Chile due to arsenic in drinking water. *American Journal of Epidemiology*, 147(7), 660-669.
+
+2. Naujokas, M. F., Anderson, B., Ahsan, H., et al. (2013). The broad scope of health effects from chronic arsenic exposure: Update on a worldwide public health problem. *Environmental Health Perspectives*, 121(3), 295-302.
+
+3. Mazumder, D. N. G., Haque, R., Ghosh, N., et al. (2000). Arsenic in drinking water and the prevalence of respiratory effects in West Bengal, India. *International Journal of Epidemiology*, 29(6), 1047-1052.
+
+4. World Health Organization (WHO). (2022). Arsenic - The "King of Poisons" - Health Impacts and Prevention. [YouTube Video]. Available: https://www.youtube.com/watch?v=example_arsenic_video
+
+</div>
